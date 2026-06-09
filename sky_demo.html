@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>Sky Health</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#060910;color:#dde;font-family:'Segoe UI',sans-serif;
+     display:flex;flex-direction:column;align-items:center;
+     padding:24px 16px;min-height:100vh}
+
+h1{font-size:1.5em;color:#7eb8f7;letter-spacing:3px;margin-bottom:2px}
+.sub{font-size:.7em;color:#445;margin-bottom:24px}
+
+/* T score big display */
+.ring{position:relative;width:180px;height:180px;margin:0 auto 20px}
+.ring svg{position:absolute;top:0;left:0;width:180px;height:180px}
+.ring-bg{fill:none;stroke:#111a2e;stroke-width:14}
+.ring-fg{fill:none;stroke:#7eb8f7;stroke-width:14;
+         stroke-linecap:round;
+         stroke-dasharray:440;stroke-dashoffset:440;
+         transition:stroke-dashoffset .6s,stroke .6s;
+         transform:rotate(-90deg);transform-origin:90px 90px}
+.ring-center{position:absolute;top:0;left:0;width:180px;height:180px;
+             display:flex;flex-direction:column;align-items:center;justify-content:center}
+.t-num{font-size:2.6em;font-weight:700;color:#7eb8f7;transition:color .5s}
+.t-lbl{font-size:.65em;color:#445;letter-spacing:2px;margin-top:-4px}
+
+/* status card */
+.card{width:100%;max-width:340px;border-radius:14px;padding:14px 18px;
+      margin-bottom:12px;background:#0c1220;border:1px solid #1a2a40}
+.card-lbl{font-size:.65em;color:#445;margin-bottom:4px;letter-spacing:1px}
+.card-val{font-size:1.05em;font-weight:600;color:#7eb8f7}
+
+.advice{background:#0a160a;border-color:#1a3a1a;color:#8dc88d;
+        font-size:.83em;line-height:1.6;display:none}
+
+/* stats row */
+.stats{display:flex;width:100%;max-width:340px;gap:8px;margin-bottom:12px}
+.stat{flex:1;background:#0c1220;border:1px solid #1a2a40;
+      border-radius:10px;padding:10px;text-align:center}
+.stat-l{font-size:.6em;color:#445}
+.stat-v{font-size:1.1em;font-weight:700;color:#7eb8f7}
+
+/* graph */
+.gcont{width:100%;max-width:340px;background:#060910;
+       border:1px solid #1a2a40;border-radius:12px;
+       overflow:hidden;margin-bottom:12px}
+.gcont p{font-size:.65em;color:#445;padding:8px 10px 2px}
+#gc{width:100%;height:70px;display:block}
+
+/* button */
+#btn{width:100%;max-width:340px;padding:14px;border:none;
+     border-radius:12px;font-size:1em;font-weight:700;
+     background:linear-gradient(135deg,#1a5fa8,#7eb8f7);
+     color:#fff;cursor:pointer;margin-bottom:12px;letter-spacing:1px}
+#btn:active{opacity:.8}
+
+/* camera preview */
+#cam-wrap{width:80px;height:80px;border-radius:50%;overflow:hidden;
+          border:2px solid #1a2a40;margin-bottom:12px;display:none}
+#camImg{width:80px;height:80px;object-fit:cover}
+video,canvas{display:none}
+
+/* alert */
+.alert{display:none;width:100%;max-width:340px;background:#250808;
+       border:2px solid #c04040;border-radius:12px;padding:12px;
+       text-align:center;color:#e07070;font-weight:700;
+       margin-bottom:12px;animation:blink 1s infinite}
+@keyframes blink{50%{opacity:.5}}
+
+.foot{font-size:.6em;color:#2a3a4a;text-align:center;margin-top:8px}
+</style>
+</head>
+<body>
+
+<h1>SKY HEALTH</h1>
+<div class="sub">dH/dt &lt; 0 · Sky Entropy Monitor · 2026</div>
+
+<!-- camera tiny preview -->
+<div id="cam-wrap"><img id="camImg" src="" alt=""></div>
+
+<!-- T ring -->
+<div class="ring">
+  <svg viewBox="0 0 180 180">
+    <circle class="ring-bg" cx="90" cy="90" r="70"/>
+    <circle class="ring-fg" id="ring" cx="90" cy="90" r="70"/>
+  </svg>
+  <div class="ring-center">
+    <div class="t-num" id="tNum">0.000</div>
+    <div class="t-lbl">SKY T</div>
+  </div>
+</div>
+
+<div class="alert" id="alrt">⚠ T สูงผิดปกติ — ตรวจสอบ</div>
+
+<div class="card">
+  <div class="card-lbl">สถานะ</div>
+  <div class="card-val" id="status">กด START เพื่อเริ่ม</div>
+</div>
+
+<div class="card advice" id="adv"></div>
+
+<div class="stats">
+  <div class="stat"><div class="stat-l">BPM</div><div class="stat-v" id="bpm">—</div></div>
+  <div class="stat"><div class="stat-l">Entropy H</div><div class="stat-v" id="hh">—</div></div>
+  <div class="stat"><div class="stat-l">Patterns</div><div class="stat-v" id="pp">—</div></div>
+</div>
+
+<div class="gcont">
+  <p>T history (60s)</p>
+  <canvas id="gc"></canvas>
+</div>
+
+<button id="btn" onclick="toggle()">START</button>
+
+<video id="vid" autoplay playsinline muted></video>
+<canvas id="cv" width="80" height="80"></canvas>
+
+<div class="foot">Sky Theorem EXP-48 · June 2026<br>
+  ถ้ากล้องไม่ขึ้น: เปิดผ่าน sky_server.py แล้วใช้ WiFi</div>
+
+<script>
+// ─── SKY ALGORITHM ───────────────────────────────────────
+const HMAX = Math.log(24); // log(4!) nats
+
+function pe(sig, m, tau) {
+  const pat = {};
+  let cnt = 0;
+  for (let i = 0; i <= sig.length - m * tau; i++) {
+    const s = Array.from({length: m}, (_, j) => sig[i + j * tau]);
+    const k = Array.from({length: m}, (_, i) => i)
+                   .sort((a, b) => s[a] - s[b]).join(',');
+    pat[k] = (pat[k] || 0) + 1;
+    cnt++;
+  }
+  if (!cnt) return [0, 0];
+  const vals = Object.values(pat);
+  const h = vals.reduce((s, c) => { const p=c/cnt; return s - p*Math.log(p); }, 0);
+  return [h, vals.length];
+}
+
+const skyT = h => Math.max(0, 1 - h / HMAX);
+
+// ─── STATE ───────────────────────────────────────────────
+let running = false, stream = null, raf = null;
+const BUF_SIZE = 150; // 5s × 30fps
+let buf = [], tHist = [], tick = 0;
+let useCamera = false;
+
+const vid = document.getElementById('vid');
+const cv  = document.getElementById('cv');
+const ctx = cv.getContext('2d');
+
+// ─── TOGGLE ──────────────────────────────────────────────
+async function toggle() {
+  if (running) { stop(); return; }
+  running = true;
+  buf = []; tHist = []; tick = 0;
+  document.getElementById('btn').textContent = 'STOP';
+
+  // try camera
+  if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+    try {
+      stream = await navigator.mediaDevices.getUserMedia(
+        {video: {facingMode: {ideal:'environment'}, width:80, height:80}});
+      vid.srcObject = stream;
+      await vid.play();
+      useCamera = true;
+      document.getElementById('cam-wrap').style.display = 'block';
+      loop();
+      return;
+    } catch(e) {}
+  }
+  // no camera → simulation
+  useCamera = false;
+  sim();
+}
+
+function stop() {
+  running = false;
+  if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
+  if (raf) cancelAnimationFrame(raf);
+  document.getElementById('btn').textContent = 'START';
+  document.getElementById('cam-wrap').style.display = 'none';
+}
+
+// ─── CAMERA LOOP ─────────────────────────────────────────
+function loop() {
+  if (!running) return;
+  ctx.drawImage(vid, 0, 0, 80, 80);
+
+  // show preview
+  document.getElementById('camImg').src = cv.toDataURL('image/jpeg', 0.5);
+
+  // extract red channel mean from center 40×40
+  const d = ctx.getImageData(20, 20, 40, 40).data;
+  let r = 0;
+  for (let i = 0; i < d.length; i += 4) r += d[i];
+  buf.push(r / (d.length / 4));
+  if (buf.length > BUF_SIZE) buf.shift();
+
+  tick++;
+  if (tick % 10 === 0 && buf.length >= BUF_SIZE) compute();
+
+  raf = requestAnimationFrame(loop);
+}
+
+// ─── SIMULATION ──────────────────────────────────────────
+function sim() {
+  if (!running) return;
+  tick++;
+  const t = tick / 60; // 60 ticks per sim-second
+
+  const phase = Math.floor(t / 25) % 4;
+  let v;
+  const r = () => (Math.random() - .5);
+
+  if (phase === 0) {       // normal
+    v = 128 + 30*Math.sin(2*Math.PI*1.2*t) + 8*Math.sin(2*Math.PI*2.4*t) + 40*r();
+  } else if (phase === 1) { // arrhythmia building
+    const s = Math.min(1, (t % 25) / 15);
+    v = 128 + 25*(1-s*.5)*Math.sin(2*Math.PI*1.2*t) +
+        60*s*Math.sin(2*Math.PI*3.5*t) + 25*(1-s)*r();
+  } else if (phase === 2) { // flutter
+    v = 140 + 70*Math.sin(2*Math.PI*3.5*t) + 10*r();
+  } else {                  // recovery
+    v = 128 + 30*Math.sin(2*Math.PI*1.2*t) + 30*r();
+  }
+
+  buf.push(v);
+  if (buf.length > BUF_SIZE) buf.shift();
+
+  if (tick % 10 === 0 && buf.length >= BUF_SIZE) {
+    compute();
+    // estimate BPM from phase
+    document.getElementById('bpm').textContent =
+      phase===2 ? '108' : phase===1 ? '88' : '72';
+  }
+
+  if (running) setTimeout(sim, 1000/60);
+}
+
+// ─── COMPUTE SKY T ───────────────────────────────────────
+function compute() {
+  const [h, n] = pe(buf, 4, 2);
+  const T = skyT(h);
+
+  tHist.push(T);
+  if (tHist.length > 60) tHist.shift();
+
+  updateUI(T, h, n);
+  drawGraph();
+}
+
+// ─── UI ──────────────────────────────────────────────────
+function updateUI(T, h, n) {
+  // ring
+  const pct = Math.min(T / 0.5, 1); // scale: 0.5 = full ring
+  const dash = 440 * (1 - pct);
+  const ring = document.getElementById('ring');
+  ring.style.strokeDashoffset = dash;
+
+  const tEl = document.getElementById('tNum');
+  tEl.textContent = T.toFixed(4);
+
+  // color
+  const color = T < 0.05 ? '#7eb8f7' : T < 0.12 ? '#f7c87e' : '#f07070';
+  tEl.style.color = color;
+  ring.style.stroke = color;
+
+  document.getElementById('hh').textContent = h.toFixed(3);
+  document.getElementById('pp').textContent = n + '/24';
+
+  // status + advice
+  let status, advice;
+  if (T < 0.04) {
+    status = 'ปกติ — หัวใจสมดุล';
+    advice = 'ชีพจรมีความหลากหลายปกติ ร่างกายอยู่ใน attractor สุขภาพดี';
+  } else if (T < 0.08) {
+    status = 'เริ่มตึงเครียด';
+    advice = '• ดื่มน้ำ 1-2 แก้ว\n• หายใจช้า 4-7-8\n• ลด caffeine\n• พักสายตา';
+  } else if (T < 0.15) {
+    status = 'จังหวะผิดปกติ — ระวัง';
+    advice = '• นั่งพักทันที\n• หายใจลึกๆ\n• งดออกกำลังกาย\n• วัด BP ถ้ามีเครื่อง';
+  } else {
+    status = 'T สูงมาก — ตรวจสอบ';
+    advice = '• นอนลงทันที\n• โทรหาคนดูแล\n• อย่าขับรถ\n• ถ้าอาการไม่ดีขึ้น → ER';
+  }
+
+  document.getElementById('status').textContent = status;
+  document.getElementById('status').style.color = color;
+  const adv = document.getElementById('adv');
+  adv.textContent = advice;
+  adv.style.display = 'block';
+  document.getElementById('alrt').style.display = T > 0.15 ? 'block' : 'none';
+}
+
+// ─── GRAPH ───────────────────────────────────────────────
+function drawGraph() {
+  const gc = document.getElementById('gc');
+  gc.width = gc.offsetWidth || 340;
+  const g  = gc.getContext('2d');
+  const W  = gc.width, H = 70, n = tHist.length;
+  g.clearRect(0, 0, W, H);
+  if (n < 2) return;
+
+  // grid lines
+  g.strokeStyle = '#111a2e'; g.lineWidth = 1;
+  [.1, .2, .3].forEach(y => {
+    const py = H - (y / 0.5) * H * .85 - 4;
+    g.beginPath(); g.moveTo(0, py); g.lineTo(W, py); g.stroke();
+  });
+
+  // line + fill
+  g.beginPath();
+  tHist.forEach((v, i) => {
+    const x = (i / (n - 1)) * W;
+    const y = H - (v / 0.5) * H * .85 - 4;
+    i === 0 ? g.moveTo(x, y) : g.lineTo(x, y);
+  });
+  g.strokeStyle = '#7eb8f7'; g.lineWidth = 2; g.stroke();
+  g.lineTo(W, H); g.lineTo(0, H); g.closePath();
+  g.fillStyle = 'rgba(126,184,247,.07)'; g.fill();
+
+  // dot
+  const last = tHist[n - 1];
+  g.beginPath();
+  g.arc(W - 4, H - (last / 0.5) * H * .85 - 4, 4, 0, Math.PI * 2);
+  g.fillStyle = last > 0.15 ? '#f07070' : '#7eb8f7'; g.fill();
+}
+</script>
+</body>
+</html>
